@@ -1,3 +1,4 @@
+import { createRoot } from 'react-dom/client'; // Make sure this is at the top
 import React, { useState, useMemo, useRef } from 'react';
 import { 
   Plus, 
@@ -1117,3 +1118,5 @@ const App = () => {
 };
 
 export default App;
+const root = createRoot(document.getElementById('root'));
+root.render(<App />);
