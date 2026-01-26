@@ -1,3 +1,4 @@
+import './index.css'
 import { createRoot } from 'react-dom/client'; // Make sure this is at the top
 import React, { useState, useMemo, useRef } from 'react';
 import { 
