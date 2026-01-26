@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   Plus, 
   Trash2, 
   FileSpreadsheet, 
   Download,
+  Upload,
   Search,
   ChevronDown,
   X,
@@ -428,7 +429,10 @@ const App = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isCostColumnsVisible, setIsCostColumnsVisible] = useState(true); // NEW: Toggle costs
+  const [isCostColumnsVisible, setIsCostColumnsVisible] = useState(true); 
+
+  // File Upload Ref
+  const fileInputRef = useRef(null);
 
   // --- Search Logic ---
   const searchResults = useMemo(() => {
@@ -440,15 +444,12 @@ const App = () => {
     Object.keys(csiData).forEach(divCode => {
       const division = csiData[divCode];
       
-      // Check Division
       if (divCode.includes(query) || division.title.toLowerCase().includes(query)) {
-        // We generally don't add just the division as an item, but we could.
       }
 
       Object.keys(division.sections).forEach(secCode => {
         const section = division.sections[secCode];
         
-        // Check Section
         if (secCode.includes(query) || section.title.toLowerCase().includes(query)) {
            results.push({
              code: secCode,
@@ -460,7 +461,6 @@ const App = () => {
         }
 
         Object.entries(section.sub).forEach(([subCode, subTitle]) => {
-           // Check Subsection
            if (subCode.includes(query) || subTitle.toLowerCase().includes(query)) {
              results.push({
                code: subCode,
@@ -473,7 +473,7 @@ const App = () => {
         });
       });
     });
-    return results.slice(0, 50); // Limit results for performance
+    return results.slice(0, 50); 
   }, [searchQuery, csiData]);
 
 
@@ -514,13 +514,12 @@ const App = () => {
   };
 
   const selectSearchResult = (res) => {
-    // Populate the dropdowns based on the search result
     setSelectedDiv(res.divCode);
     setSelectedSec(res.secCode);
     setSelectedSub(res.subCode);
     setCustomTitle(res.title);
-    setSearchQuery(""); // Clear search
-    setIsSearchActive(false); // Switch back to browser
+    setSearchQuery(""); 
+    setIsSearchActive(false); 
   };
 
   const addItem = () => {
@@ -547,7 +546,6 @@ const App = () => {
     };
 
     setBidItems([...bidItems, newItem]);
-    // Optional: Reset basic fields but keep location in tree
     setDrawingRef("");
   };
 
@@ -592,6 +590,92 @@ const App = () => {
     document.body.removeChild(link);
   };
 
+  // --- IMPORT FUNCTIONALITY ---
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target.result;
+      processImportCSV(text);
+    };
+    reader.readAsText(file);
+    // Reset file input so same file can be uploaded again if needed
+    e.target.value = '';
+  };
+
+  const processImportCSV = (csvText) => {
+    try {
+      const lines = csvText.split('\n');
+      const newProjectInfo = { ...projectInfo };
+      const newBidItems = [];
+
+      // Parse Headers (Project Info)
+      // Expecting standard format from exportToCSV
+      lines.forEach((line, index) => {
+        if (index < 5) {
+          const parts = line.split(',');
+          if (parts.length >= 2) {
+            const key = parts[0].trim();
+            const val = parts.slice(1).join(',').trim(); // Join back in case value had commas
+            
+            if (key.includes('Project Name')) newProjectInfo.name = val;
+            if (key.includes('Location')) newProjectInfo.location = val;
+            if (key.includes('Construction Engineer')) newProjectInfo.engineer = val;
+            if (key.includes('Bid Due Date')) newProjectInfo.bidDueDate = val;
+          }
+        }
+      });
+
+      // Parse Data Rows (Skip until header row, usually line 6)
+      let dataStartIndex = -1;
+      for(let i=0; i<lines.length; i++) {
+        if (lines[i].startsWith('Division,Section,CSI Code')) {
+          dataStartIndex = i + 1;
+          break;
+        }
+      }
+
+      if (dataStartIndex !== -1) {
+        for (let i = dataStartIndex; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+
+          // Complex split for CSV (handling quoted commas)
+          // Matches a comma only if it's followed by an even number of quotes
+          const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+          
+          if (parts.length >= 8) {
+            const clean = (str) => str ? str.replace(/^"|"$/g, '').replace(/""/g, '"') : '';
+
+            newBidItems.push({
+              id: Date.now() + i, // Unique ID
+              division: clean(parts[0]),
+              section: clean(parts[1]),
+              code: clean(parts[2]),
+              dwgRef: clean(parts[3]),
+              title: clean(parts[4]),
+              description: clean(parts[5]),
+              quantity: parseFloat(parts[6]) || 0,
+              unit: clean(parts[7]),
+              labor: parts[8] || '',
+              material: parts[9] || '',
+              equipment: parts[10] || ''
+            });
+          }
+        }
+      }
+
+      setProjectInfo(newProjectInfo);
+      setBidItems(newBidItems);
+      alert(`Import Successful! Loaded ${newBidItems.length} items.`);
+    } catch (error) {
+      console.error("Import Error:", error);
+      alert("Error importing file. Please ensure it is a valid CSV generated by this tool.");
+    }
+  };
+
   // Helper to calculate row total
   const getRowTotal = (item) => {
     const l = parseFloat(item.labor) || 0;
@@ -613,11 +697,29 @@ const App = () => {
           >
             <PanelLeft className="h-5 w-5" />
           </button>
+          
           <FileSpreadsheet className="h-5 w-5" />
           <span className="font-semibold tracking-wide">CSI Bid Generator</span>
         </div>
         
-        <div>
+        <div className="flex items-center gap-2">
+          {/* Hidden File Input */}
+          <input 
+            type="file" 
+            accept=".csv" 
+            ref={fileInputRef} 
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+          
+          <button
+            onClick={() => fileInputRef.current.click()}
+            className="bg-[#185534] hover:bg-[#0e3b23] text-white px-4 py-1.5 text-xs font-semibold rounded-sm border border-[#3e8e5e] flex items-center gap-2 transition-colors"
+          >
+            <Upload className="h-4 w-4" />
+            Import Project
+          </button>
+
           <button
             onClick={exportToCSV}
             className="bg-[#10442a] hover:bg-[#0a2e1c] text-white px-4 py-1.5 text-xs font-semibold rounded-sm border border-[#3e8e5e] flex items-center gap-2 transition-colors"
